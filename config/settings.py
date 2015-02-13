@@ -46,7 +46,7 @@ INSTALLED_APPS = (
     #'theme',
     'questionapp',
     'multiprofile',
-    #'bootstrap3',
+    'bootstrap3',
     "taggit",
     # "badger",
 )
