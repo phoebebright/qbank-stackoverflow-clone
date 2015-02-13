@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load  questionbank_tags %}
+
+{% block extra_head %}
+
+    <link rel="stylesheet" type="text/css" href="{{ STATIC_URL }}css/soclone.css" media="screen">
+    <script type="text/javascript" src="{{ STATIC_URL }}js/soclone.js"></script>
+
+{% endblock %}
+
+{%  block main %}
+
+    {% block fullcontent %}
+        <div id="content">
+            <div id="pageheader">
+                <h2>{% block pageheader_title %}{% firstof pageheader_title title %}{% endblock %}</h2>
+                {% block pageheader_content %}{% endblock %}
+            </div>
+
+            {% block content %}
+
+            {% endblock %}
+        </div>
+
+    {% endblock %}
+
+{% endblock main %}

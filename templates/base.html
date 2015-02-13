@@ -1,0 +1,122 @@
+{% load staticfiles %}
+{% load i18n %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <link rel="shortcut icon" href="{% static "img/favicon.png"  %}">
+
+    <title>Carbon Conscious Choices</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="{% static "css/bootstrap.css" %}" rel="stylesheet">
+
+    <!-- Custom styles for this template -->
+    <link href="{% static "css/main.css" %}" rel="stylesheet">
+
+
+    <!-- Fonts from Google Fonts -->
+    <link href='http://fonts.googleapis.com/css?family=Lato:300,400,900' rel='stylesheet' type='text/css'>
+
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+      <script src="https://oss.maxcdn.com/libs/respond.js/1.3.0/respond.min.js"></script>
+    <![endif]-->
+
+    {% block extra_head %}
+    {% endblock extra_head %}
+</head>
+
+<body>
+{% block page %}
+
+    <div class="navbar navbar-default navbar-static-top" role="navigation">
+
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-ex1-collapse">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" rel="home" href="/" title="Carbon Conscious Choices">Carbon Conscious Choices</a>
+        </div>
+
+        <div class="collapse navbar-collapse navbar-ex1-collapse">
+
+            <ul class="nav navbar-nav">
+                <li id="nav-questions"><a href="{% url 'questions' %}">Questions</a></li>
+                <li id="nav-tags"><a href="{% url 'tags' %}">Tags</a></li>
+                <li id="nav-users"><a href="{% url 'users' %}">Users</a></li>
+                <li id="nav-badges"><a href="{% url 'badges' %}">Badges</a></li>
+                <li id="nav-unanswered"><a href="{% url 'unanswered' %}">Unanswered</a></li>
+                <li id="nav-ask-question"><a href="{% url 'ask_question' %}">Ask Question</a></li>
+            </ul>
+
+            <div class="col-sm-3 col-md-3 pull-right">
+{#                 {% if user|is_lazy_user %}#}
+{#                    <a href="{% url "lazysignup_convert"  %}">{% trans "Save your data by setting a username and password" %}</a>#}
+{#                {%  else  %}#}
+
+                    {% if user.is_authenticated %}
+
+                        <a data-toggle="dropdown" href="#" class="glyphicons logout lock"><span class="hidden-tablet hidden-phone ">{{ user.username }}</span><i></i></a>
+
+									<a class="btn btn-default btn-mini pull-right " href="{%  url "account_logout" %}">{% trans "Logout" %}</a>
+
+
+                    {% else %}
+
+                        <a  href="{% url "account_login" %}" class="glyphicons login unlock"><span class="hidden-tablet hidden-phone hidden-desktop-1">{% trans "Login" %}</span><i></i></a>
+
+                    {% endif %}
+{#                {%  endif  %}#}
+
+
+            </div>
+
+        </div>
+    </div>
+
+
+
+    <div class="container">
+
+        <div class="row mt centered">
+            {% block main %}
+                {% block body %}
+                {% endblock body %}
+            {% endblock main %}
+        </div>
+
+    </div><!-- /container -->
+{% endblock %}
+
+<!-- Bootstrap core JavaScript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="https://code.jquery.com/jquery-1.10.2.min.js"></script>
+<script src="{% static "js/bootstrap.min.js" %}"></script>
+
+{% block js %}
+{% endblock js %}
+</body>
+</html>
+
+
+<!--
+<form class="navbar-form" role="search">
+                    <div class="input-group">
+                        <input type="text" class="form-control" placeholder="Search" name="srch-term" id="srch-term">
+                        <div class="input-group-btn">
+                            <button class="btn btn-default" type="submit"><i class="glyphicon glyphicon-search"></i></button>
+                        </div>
+                    </div>
+                </form>
+                -->

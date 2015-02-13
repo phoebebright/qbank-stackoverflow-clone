@@ -1,0 +1,221 @@
+{% extends "q_base_2col.html" %}
+{% load html questionbank_tags %}
+
+{% block bodyclass %}questions question{% endblock %}
+
+{% block extrahead %}
+    <link rel="stylesheet" type="text/css" href="{{ MEDIA_URL }}css/prettify.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="{{ MEDIA_URL }}css/textarearesizer.css" media="screen">
+    <script type="text/javascript" src="{{ MEDIA_URL }}js/wmd/wmd.js"></script>
+    <script type="text/javascript" src="{{ MEDIA_URL }}js/typewatch-2.0.0.js"></script>
+    <script type="text/javascript" src="{{ MEDIA_URL }}js/textarearesizer-1.0.4.js"></script>
+    <script type="text/javascript" src="{{ MEDIA_URL }}js/prettify.js"></script>
+    <script type="text/javascript">
+        $(function()
+        {
+            $("#id_text").typeWatch({highlight: false, wait: 3000,
+                captureLength: 5, callback: SOClone.styleCode});
+            $("#id_text:not(.processed)").TextAreaResizer();
+            SOClone.styleCode();
+        });
+    </script>
+{% endblock %}
+
+{% block main %}
+    <div id="question">
+        <div class="vote">
+            <form class="vote" id="question-up-{{ question.id }}" action="{% url 'vote_on_question' question.id %}" method="POST">
+                {% csrf_token %}
+                <input type="hidden" name="type" value="up">
+                <input type="image" id="question-uparrow-{{ question.id }}"
+                       src="{{ STATIC_URL }}img/up{% if question_vote and question_vote.is_upvote %}-on{% endif %}.jpg"
+                       alt="{% if question_vote and question_vote.is_upvote %}Undo Up Vote{% else %}Vote Up{% endif %}">
+            </form>
+            <span class="score" id="question-score-{{ question.id }}">{{ question.score }}</span>
+            <form class="vote" id="question-down-{{ question.id }}" action="{% url 'vote_on_question' question.id %}" method="POST">
+                {% csrf_token %}
+                <input type="hidden" name="type" value="down">
+                <input type="image" id="question-downarrow-{{ question.id }}"
+                       src="{{ STATIC_URL }}img/down{% if question_vote and question_vote.is_downvote %}-on{% endif %}.jpg"
+                       alt="{% if question_vote and question_vote.is_downvote %}Undo Down Vote{% else %}Vote Down{% endif %}">
+            </form>
+            <form class="favourite" id="question-favourite-{{ question.id }}" action="{% url 'favourite_question' question.id %}" method="POST">
+                {% csrf_token %}
+                <input type="image" id="question-star-{{ question.id }}"
+                       src="{{ STATIC_URL }}img/favourite{% if favourite %}-on{% endif %}.jpg"
+                       alt="{% if favourite %}Remove{% else %}Add{% endif %} Favourite">
+                <strong>{{ question.favourite_count }}</strong>
+            </form>
+        </div>
+        <div class="content">
+            <h3>{{ question.title }}</h3>
+            <div class="text">
+                {{ question.html|safe }}
+            </div>
+            <div class="tags">
+                {% for tag in question.tagname_list %}
+                    <a href="{% url 'tag' tag %}" class="tag" title="show questions tagged '{{ tag }}'" rel="tag">{{ tag}}</a>
+                {% endfor %}
+            </div>
+            <div class="meta">
+                <div class="controls">
+                    {% if user|can_retag_questions %}
+                        <a href="{% url 'edit_question question.id' %}" title="edit tags on this question">retag</a>
+                        <span class="link-separator">|</span>
+                    {% endif %}
+                    {% if user|can_edit_post:question %}
+                        <a href="{% url 'edit_question' question.id %}" title="edit this question, or roll it back to a previous version">edit</a>
+                        <span class="link-separator">|</span>
+                    {% endif %}
+                    {% if user|can_close_question:question %}
+                        <a href="{% url 'close_question' question.id %}" title="closes/opens question for answering; when closed, no more answers can be added">{% if not question.closed %}close{% else %}open{% endif %}</a>
+                    {% endif %}
+                </div>
+                <div class="users">
+                    {% post_user_details question %}
+                </div>
+            </div>
+            <div class="comments">
+                <div id="question-comments-container-{{ question.id }}" class="comments-container"></div>
+            </div>
+        </div>
+    </div>
+
+    {% if question.closed %}
+        <h2 class="close-reason">
+            Question <span class="warning">closed</span> as "{{ question.get_close_reason_display }}"
+            by <a href="{% url 'user' question.closed_by.id %}{{ question.closed_by.username }}/">{{ question.closed_by.username }}</a>
+            {{ question.closed_at|timesince }} ago
+        </h2>
+    {% endif %}
+
+    {% if page.has_other_pages %}
+        <div class="pagination">
+            {% pager page sort=answer_sort %}
+        </div>
+    {% endif %}
+
+    <div id="answers">
+        <div id="answer-header">
+            <h4>{{ question.answer_count }} Answer{{ question.answer_count|pluralize }}:</h4>
+            <div class="tabs">
+                <a href="{% url 'question' question.id %}?sort=oldest#answers" title="Answers in the order they were given"{% ifequal answer_sort "oldest" %} class="active"{% endifequal %}>Oldest</a>
+                <a href="{% url 'question' question.id %}?sort=newest#answers" title="Most recent answers first"{% ifequal answer_sort "newest" %} class="active"{% endifequal %}>Newest</a>
+                <a href="{% url 'question' question.id %}?sort=votes#answers" title="Answers with the most votes first"{% ifequal answer_sort "votes" %} class="active"{% endifequal %}>Votes</a>
+            </div>
+        </div>
+
+        {% for answer in question.live_answers %}
+            {% user_vote user answer as vote %}
+
+            <div class="answer{% ifequal question.author_id answer.author_id %} author-answer{% endifequal %}{% if answer.accepted %} accepted{% endif %}" id="answer-{{ answer.id }}">
+                <div class="vote">
+
+                    <form class="vote" id="answer-up-{{ answer.id }}" action="{% url 'vote_on_answer' answer.id %}" method="POST">
+                        {% csrf_token %}
+                        <input type="hidden" name="type" value="up">
+                        <input type="image" id="answer-uparrow-{{ answer.id }}"
+                               src="{{ STATIC_URL }}img/up{% if vote and vote.is_upvote %}-on{% endif %}.jpg"
+                               alt="{% if vote and vote.is_upvote %}Undo Up Vote{% else %}Vote Up{% endif %}">
+                    </form>
+
+                    <span class="score" id="answer-score-{{ answer.id }}">{{ answer.score }}</span>
+
+                    <form class="vote" id="answer-down-{{ answer.id }}" action="{% url 'vote_on_answer' answer.id %}" method="POST">
+                        {% csrf_token %}
+                        <input type="hidden" name="type" value="down">
+                        <input type="image" id="answer-downarrow-{{ answer.id }}"
+                               src="{{ STATIC_URL }}img/down{% if vote and vote.is_downvote %}-on{% endif %}.jpg"
+                               alt="{% if vote and vote.is_downvote %}Undo Down Vote{% else %}Vote Down{% endif %}">
+                    </form>
+
+                    {% if user|can_accept_answer:question %}
+                        <form class="accept" id="accept-{{ answer.id }}" action="{% url 'accept_answer' answer.id %}" method="POST">
+                            {% csrf_token %}
+                            <input type="image" id="acccept-tick-{{ answer.id }}"
+                                   src="{{ STATIC_URL }}img/accept{% if answer.accepted %}-on{% endif %}.png"
+                                   alt="{% if answer.accepted %}Withdraw Acceptance{% else %}Accept{% endif %}">
+                        </form>
+                    {% endif %}
+
+                    {% ifnotequal question.author user %}
+                        {% if answer.accepted %}
+                            <img src="{{ STATIC_URL }}img/accept-on.png" alt="AskHere">
+                        {% endif %}
+                    {% endifnotequal %}
+
+                </div>
+                <div class="content">
+                    <div class="text">
+                        {{ answer.html|safe }}
+                    </div>
+                    <div class="meta">
+                        <div class="controls">
+                            {% if user|can_edit_post:answer %}
+                                <a href="{% url 'edit_answer' answer.id %}" title="edit this answer, or roll it back to a previous version">edit</a>
+                            {% endif %}
+                        </div>
+                        <div class="users">
+                            {% post_user_details answer %}
+                        </div>
+                    </div>
+                    <div class="comments">
+                        <div id="answer-comments-container-{{ answer.id }}" class="comments-container"></div>
+                    </div>
+                </div>
+            </div>
+
+        {% endfor %}
+    </div>
+
+    {% if page.has_other_pages %}
+        <div class="pagination">
+            {% pager page sort=answer_sort %}
+        </div>
+    {% endif %}
+
+    {% if not question.closed %}
+        <form id="answer-form" method="POST" action="{% url 'add_answer' question.id %}">
+            {% csrf_token %}
+            <h3></h3>
+
+            <div class="form-item">
+                <div class="resizable-textarea">
+                    {% field answer_form.text %}
+                </div>
+            </div>
+            <div class="form-item">
+                <div class="wmd-preview text"></div>
+            </div>
+            <div class="form-submit">
+                <input type="submit" name="submit" value="Post Your Answer">
+            </div>
+        </form>
+    {% endif %}
+{% endblock %}
+
+{% block sidebar %}
+    <div class="module question-sidebar">
+        <p>You're viewing a single question tagged</p>
+        <ol>{% for tag in tags %}
+            <li>
+                <a href="{{ tag.get_absolute_url }}" class="tag" title="show questions tagged '{{ tag.name }}'" rel="tag">{{ tag.name }}</a> <span class="item-multiplier">&times; {{ tag.use_count }}</span>
+            </li>
+        {% endfor %}</ol>
+        <dl>
+            <dt>asked</dt>
+            <dd>{{ question.added_at|timesince }} ago</dd>
+            <dt>viewed</dt>
+            <dd>{{ question.view_count }} time{{ question.view_count|pluralize }}</dd>
+            <dt>latest activity</dt>
+            <dd>{{ question.last_activity_at|timesince }} ago</dd>
+        </dl>
+    </div>
+
+    <div class="module related-questions">
+        <h4>Related Questions</h4>
+        {% for question in related_questions %}
+            <h3><a href="{{ question.get_absolute_url }}">{{ question.title }}</a></h3><br>
+        {% endfor %}
+    </div>
+{% endblock %}

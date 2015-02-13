@@ -1,0 +1,19 @@
+{% extends "q_base.html" %}
+{% load questionbank_tags list_tags humanize %}
+
+{% block bodyclass %}users{% endblock %}
+
+{% block content %}
+
+<div class="user-info">
+          <div class="user-gravatar64"><a href="{% url 'user' user.id %}{{ user.username }}/">{% gravatar user.quser 100 %}</a></div>
+          <div class="user-details">
+            <br/>
+            <h2>Reputation: {% reputation user %}</h2></br>
+            <h2>Member Since: {{user.last_seen}}</h2>
+          </div>
+        </div>
+
+{% endblock %}
+
+

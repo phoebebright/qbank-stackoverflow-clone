@@ -1,0 +1,399 @@
+from django.db import models
+from django.contrib.auth.models import User, UserManager
+import datetime
+from django.contrib.contenttypes import generic
+from django.core.urlresolvers import reverse
+from django.db import connection, models, transaction
+from django.template.defaultfilters import slugify
+from django.db.models import Q
+import collections
+import datetime
+import hashlib
+import re
+from django.contrib.contenttypes.models import ContentType
+from django.db.models.signals import post_delete, post_save, pre_save
+
+class TagManager(models.Manager):
+    UPDATE_USE_COUNTS_QUERY = (
+        'UPDATE questionapp_tag '
+        'SET use_count = ('
+            'SELECT COUNT(*) FROM questionapp_question_tags '
+            'WHERE tag_id = questionapp_tag.id'
+        ') '
+        'WHERE id IN (%s)')
+
+    def get_or_create_multiple(self, names, user):
+        tags = list(self.filter(name__in=names))
+        if len(tags) < len(names):
+            existing_names = set(tag.name for tag in tags)
+            new_names = [name for name in names if name not in existing_names]
+            tags.extend([self.create(name=name, created_by=user)
+                         for name in new_names])
+        return tags
+
+    def update_use_counts(self, tags):
+        if not tags:
+            return
+        cursor = connection.cursor()
+        query = self.UPDATE_USE_COUNTS_QUERY % ','.join(['%s'] * len(tags))
+        cursor.execute(query, [tag.id for tag in tags])
+        transaction.commit_unless_managed()
+
+
+class Tag(models.Model):
+    name       = models.CharField(max_length=24, unique=True)
+    created_by = models.ForeignKey(User, related_name='created_tags')
+    use_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ('-use_count', 'name')
+
+    def __unicode__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('tag', args=[self.name])
+
+    objects = TagManager()
+
+class QuestionManager(models.Manager):
+    def update_tags(self, question, tagnames, user):
+        current_tags = list(question.tags.all())
+        current_tagnames = set(t.name for t in current_tags)
+        updated_tagnames = set(t for t in tagnames.split(' ') if t)
+        modified_tags = []
+
+        removed_tags = [t for t in current_tags
+                        if t.name not in updated_tagnames]
+        if removed_tags:
+            modified_tags.extend(removed_tags)
+            question.tags.remove(*removed_tags)
+
+        added_tagnames = updated_tagnames - current_tagnames
+        if added_tagnames:
+            added_tags = Tag.objects.get_or_create_multiple(added_tagnames,
+                                                            user)
+            modified_tags.extend(added_tags)
+            question.tags.add(*added_tags)
+
+        if modified_tags:
+            Tag.objects.update_use_counts(modified_tags)
+            return True
+
+        return False
+
+    def update_answer_count(self, question):
+        self.filter(id=question.id).update(
+            answer_count=Answer.objects.for_question(question).count())
+
+    def update_view_count(self, question):
+        view_count_current = self.filter(id=question.id)[0].view_count
+        self.filter(id=question.id).update(
+            view_count=view_count_current +1)
+
+class Question(models.Model):
+    CLOSE_REASONS = (
+        (1, u'Exact duplicate'),
+        (2, u'Not programming related'),
+        (3, u'Not a real question'),
+        (4, u'No longer relevant'),
+        (5, u'Spam'),
+    )
+
+    title    = models.CharField(max_length=300)
+    author   = models.ForeignKey(User, related_name='questions')
+    added_at = models.DateTimeField(default=datetime.datetime.now)
+    tags     = models.ManyToManyField(Tag, related_name='questions')
+    answer_accepted = models.BooleanField(default=False)
+    closed          = models.BooleanField(default=False)
+    closed_by       = models.ForeignKey(User, null=True, blank=True, related_name='closed_questions')
+    closed_at       = models.DateTimeField(null=True, blank=True)
+    close_reason    = models.SmallIntegerField(choices=CLOSE_REASONS, null=True, blank=True)
+    score                = models.IntegerField(default=0)
+    answer_count         = models.PositiveIntegerField(default=0)
+    comment_count        = models.PositiveIntegerField(default=0)
+    view_count           = models.PositiveIntegerField(default=0)
+    favourite_count      = models.PositiveIntegerField(default=0)
+    last_edited_at       = models.DateTimeField(null=True, blank=True)
+    last_edited_by       = models.ForeignKey(User, null=True, blank=True, related_name='last_edited_questions')
+    last_activity_at     = models.DateTimeField()
+    last_activity_by     = models.ForeignKey(User, related_name='last_active_in_questions')
+    tagnames             = models.CharField(max_length=125)
+    summary              = models.CharField(max_length=180)
+    html                 = models.TextField()
+   
+    objects = QuestionManager()
+
+    def save(self, **kwargs):
+        initial_addition = (self.id is None)
+        super(Question, self).save(**kwargs)
+        if initial_addition:
+            tags = Tag.objects.get_or_create_multiple(self.tagname_list(),
+                                                      self.author)
+            self.tags.add(*tags)
+            Tag.objects.update_use_counts(tags)
+
+    def __unicode__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        return '%s%s/' % (reverse('question', args=[self.id]),
+                          slugify(self.title))
+
+    def get_revision_url(self):
+        return reverse('question_revisions', args=[self.id])
+
+    def get_latest_revision(self):
+        return self.revisions.all()[0]
+
+    def tagname_list(self):
+        return [name for name in self.tagnames.split(u' ')]
+
+class AnswerManager(models.Manager):
+    def for_question(self, question, user=None):
+        if user is None or not user.is_authenticated():
+            return self.filter(question=question, deleted=False)
+        else:
+            return self.filter(Q(question=question),
+                               Q(deleted=False) | Q(deleted_by=user))
+
+
+class Answer(models.Model):
+    question = models.ForeignKey(Question, related_name='answers')
+    author   = models.ForeignKey(User, related_name='answers')
+    added_at = models.DateTimeField(default=datetime.datetime.now)
+    accepted    = models.BooleanField(default=False)
+    deleted     = models.BooleanField(default=False)
+    deleted_by  = models.ForeignKey(User, null=True, blank=True, related_name='deleted_answers')
+    locked      = models.BooleanField(default=False)
+    locked_by   = models.ForeignKey(User, null=True, blank=True, related_name='locked_answers')
+    locked_at   = models.DateTimeField(null=True, blank=True)
+    score                = models.IntegerField(default=0)
+    comment_count        = models.PositiveIntegerField(default=0)
+    offensive_flag_count = models.SmallIntegerField(default=0)
+    last_edited_at       = models.DateTimeField(null=True, blank=True)
+    last_edited_by       = models.ForeignKey(User, null=True, blank=True, related_name='last_edited_answers')
+    html                 = models.TextField()
+
+    objects = AnswerManager()
+
+    def get_absolute_url(self):
+        return reverse('answer', args=[self.id])
+
+    def get_latest_revision(self):
+        return self.revisions.all()[0]
+
+class AnswerRevision(models.Model):
+    answer     = models.ForeignKey(Answer, related_name='revisions')
+    revision   = models.PositiveIntegerField()
+    author     = models.ForeignKey(User, related_name='answer_revisions')
+    revised_at = models.DateTimeField()
+    summary    = models.CharField(max_length=300, blank=True)
+    text       = models.TextField()
+
+    class Meta:
+        ordering = ('-revision',)
+
+    def save(self, **kwargs):
+        """Looks up the next available revision number if not set."""
+        if not self.revision:
+            self.revision = AnswerRevision.objects.filter(
+                answer=self.answer).values_list('revision',
+                                                flat=True)[0] + 1
+        super(AnswerRevision, self).save(**kwargs)
+
+class QuestionRevision(models.Model):
+    question   = models.ForeignKey(Question, related_name='revisions')
+    revision   = models.PositiveIntegerField(blank=True)
+    title      = models.CharField(max_length=300)
+    author     = models.ForeignKey(User, related_name='question_revisions')
+    revised_at = models.DateTimeField()
+    tagnames   = models.CharField(max_length=125)
+    summary    = models.CharField(max_length=300, blank=True)
+    text       = models.TextField()
+
+    class Meta:
+        ordering = ('-revision',)
+
+    def save(self, **kwargs):
+        """Looks up the next available revision number."""
+        if not self.revision:
+            self.revision = QuestionRevision.objects.filter(
+                question=self.question).values_list('revision',
+                                                    flat=True)[0] + 1
+        super(QuestionRevision, self).save(**kwargs)
+
+    def __unicode__(self):
+        return u'revision %s of %s' % (self.revision, self.title)
+
+class FavouriteQuestion(models.Model):
+    question      = models.ForeignKey(Question)
+    user          = models.ForeignKey(User)
+    favourited_at = models.DateTimeField(default=datetime.datetime.now)
+
+def update_question_favourite_count(instance, **kwargs):
+    """
+    Updates the favourite count for the Question related to the given
+    FavouriteQuestion.
+    """
+    if kwargs.get('raw', False):
+        return
+    cursor = connection.cursor()
+    cursor.execute(
+        'UPDATE questionapp_question SET favourite_count = ('
+            'SELECT COUNT(*) from questionapp_favouritequestion '
+            'WHERE questionapp_favouritequestion.question_id = questionapp_question.id'
+        ') '
+        'WHERE id = %s', [instance.question_id])
+    transaction.commit_unless_managed()
+
+post_save.connect(update_question_favourite_count, sender=FavouriteQuestion)
+post_delete.connect(update_question_favourite_count, sender=FavouriteQuestion)
+
+class VoteManager(models.Manager):
+    def get_for_question_and_answers(self, user, question, answers):
+        question_vote = None
+        answer_votes = collections.defaultdict(lambda: None)
+        # No need to check the database for anonymous users
+        if not user.is_authenticated():
+            return question_vote, answer_votes
+
+        question_ct = ContentType.objects.get_for_model(Question)
+
+        # Simpler case when only retrieving votes for a Question
+        if not answers:
+            try:
+                question_vote = self.get(
+                    content_type = question_ct,
+                    object_id    = question.id,
+                    user         = user
+                )
+            except Vote.DoesNotExist:
+                pass
+            return question_vote, answer_votes
+
+        answer_ct = ContentType.objects.get_for_model(Answer)
+        votes = self.filter(
+            Q(content_type=question_ct, object_id=question.id) |
+            Q(content_type=answer_ct,
+              object_id__in=[answer.id for answer in answers]),
+            user = user
+        )
+
+        for vote in votes:
+            if vote.content_type_id == answer_ct.id:
+                answer_votes[vote.object_id] = vote
+            else:
+                question_vote = vote
+        return question_vote, answer_votes
+
+class Vote(models.Model):
+    VOTE_UP = +1
+    VOTE_DOWN = -1
+    VOTE_CHOICES = (
+        (VOTE_UP,   u'Up'),
+        (VOTE_DOWN, u'Down'),
+    )
+
+    content_type   = models.ForeignKey(ContentType)
+    object_id      = models.PositiveIntegerField()
+    content_object = generic.GenericForeignKey('content_type', 'object_id')
+    user           = models.ForeignKey(User, related_name='votes')
+    vote           = models.SmallIntegerField(choices=VOTE_CHOICES)
+
+    objects = VoteManager()
+
+    class Meta:
+        unique_together = ('content_type', 'object_id', 'user')
+
+    def is_upvote(self):
+        return self.vote == self.VOTE_UP
+
+    def is_downvote(self):
+        return self.vote == self.VOTE_DOWN
+
+class Comment(models.Model):
+    content_type   = models.ForeignKey(ContentType)
+    object_id      = models.PositiveIntegerField()
+    content_object = generic.GenericForeignKey('content_type', 'object_id')
+    user           = models.ForeignKey(User, related_name='comments')
+    comment        = models.CharField(max_length=300)
+    added_at       = models.DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        ordering = ('-added_at',)
+
+def update_post_comment_count(instance, **kwargs):
+    """
+    Updates the comment count for the Question or Answer related to the
+    given Comment.
+    """
+    if kwargs.get('raw', False):
+        return
+    cursor = connection.cursor()
+    cursor.execute(
+        'UPDATE %(post_table)s SET comment_count = ('
+            'SELECT COUNT(*) from questionapp_comment '
+            'WHERE questionapp_comment.content_type_id = %%s '
+              'AND questionapp_comment.object_id = %(post_table)s.id'
+        ') '
+        'WHERE id = %%s' % {
+            'post_table': instance.content_type.model_class()._meta.db_table,
+        }, [instance.content_type_id, instance.object_id])
+    transaction.commit_unless_managed()
+
+post_save.connect(update_post_comment_count, sender=Comment)
+post_delete.connect(update_post_comment_count, sender=Comment)
+
+def update_post_score(instance, **kwargs):
+    if kwargs.get('raw', False):
+        return
+    cursor = connection.cursor()
+    cursor.execute(
+        'UPDATE %(post_table)s SET score = ('
+            'SELECT COALESCE(SUM(vote), 0) from questionapp_vote '
+            'WHERE questionapp_vote.content_type_id = %%s '
+              'AND questionapp_vote.object_id = %(post_table)s.id'
+        ') '
+        'WHERE id = %%s' % {
+            'post_table': instance.content_type.model_class()._meta.db_table,
+        }, [instance.content_type_id, instance.object_id])
+    transaction.commit_unless_managed()
+
+post_save.connect(update_post_score, sender=Vote)
+post_delete.connect(update_post_score, sender=Vote)
+
+
+def update_reputation(manager, changes):
+    change_count = len(changes)
+    cursor = connection.cursor()
+    cursor.execute(
+        'UPDATE auth_user SET reputation = CASE %s ELSE reputation END '
+        'WHERE id IN (%s)' % (
+        ' '.join(['WHEN id = %s THEN MAX(1, reputation + %s)'] * change_count),
+        ','.join(['%s'] * change_count)),
+        flatten(changes) + [c[0] for c in changes])
+    transaction.commit_unless_managed()
+
+UserManager.update_reputation = update_reputation
+
+
+User.add_to_class('reputation', models.PositiveIntegerField(default=1))
+User.add_to_class('gravatar', models.CharField(max_length=64))
+User.add_to_class('favourite_questions',
+                  models.ManyToManyField(Question, through=FavouriteQuestion,
+                                         related_name='favourited_by'))
+User.add_to_class('last_seen',
+                  models.DateTimeField(default=datetime.datetime.now))
+
+def get_profile_url(self):
+    return '%s%s/' % (reverse('user', args=[self.id]), self.username)
+
+User.add_to_class('get_profile_url', get_profile_url)
+
+def calculate_gravatar_hash(instance, **kwargs):
+    """Calculates a User's gravatar hash from their email address."""
+    if kwargs.get('raw', False):
+        return
+    instance.gravatar = hashlib.md5(instance.email).hexdigest()
+

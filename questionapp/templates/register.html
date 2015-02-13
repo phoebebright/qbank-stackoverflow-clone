@@ -1,0 +1,28 @@
+{% extends "q_base.html" %}
+
+
+{% block content %}
+{% if user.is_authenticated %}
+  <p>You're already logged in.</p>
+{% else %}
+  {% if form.errors %}
+  <ul class="error-list"><li>Password didnt match</li></ul>
+  {% endif %}
+
+  <form method="post" action=".">
+    {% csrf_token %}
+    <div class="form-item">
+       {{ form.username.label_tag }}
+       {% field form.username %}
+    </div>
+    <div class="form-item">
+       {{ form.password.label_tag }}
+       {% field form.password %}
+    </div>
+    <div class="form-submit">
+      <input type="submit" value="Login">
+      <input type="hidden" name="next" value="{{ next }}">
+    </div>
+  </form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "account/registration_base.html" %}
+
+{% block extra-head %}
+    <style>
+    .text-error li {
+        list-style: none;
+    }
+    </style>
+{% endblock extra-head %}
+{% block content %}
+
+    <form class="form-signin" role="form" action="{{ app_path }}" method="post" id="login-form">{% csrf_token %}
+
+        <h2 class="form-signin-heading">Please sign in to Tricostar QBase</h2>
+        <div class="login-wrap">
+
+
+            {% if form.errors %}
+                <span class="text-error unstyled">{{ form.non_field_errors }}</span>
+            {% endif %}
+
+            <div class="user-login-info">
+                {% if form.username.errors %}<span class="error">{{form.username.errors }}</span>{% endif %}
+                <input name="username"  id="username" type="text" class="form-control" placeholder="Your username" required="" autofocus="">
+
+                {% if form.password.errors %}{{form.password.errors}}{% endif %}
+                <input name="password" value="" id="password" type="password" class="form-control" placeholder="Password" required="">
+            </div>
+            <a class="password" href="/password_reset/">forgot it?</a>
+            <button class="btn btn-lg btn-primary btn-block" type="submit">Sign in</button>
+
+        </div>
+
+
+    </form>
+
+
+
+
+    </div>
+
+
+
+
+
+
+
+{% endblock %}
+
+
